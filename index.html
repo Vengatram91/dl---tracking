@@ -1,242 +1,201 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Dhuruvan Logistics — Tracking</title>
-<style>
-  body{font-family:Arial,Helvetica,sans-serif;background:#f3f3f3;margin:0;padding:0}
-  .container{max-width:760px;margin:60px auto;padding:20px;background:#fff;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.06)}
-  h1{margin:0 0 16px;font-size:24px}
-  .input-row{margin-bottom:14px}
-  input[type="text"]{width:100%;padding:12px;border:1px solid #ccc;border-radius:3px;font-size:16px}
-  button{display:block;width:100%;padding:14px;background:#1e88e5;border:none;color:#fff;font-size:18px;border-radius:4px;cursor:pointer}
-  button:disabled{opacity:.6;cursor:not-allowed}
-  .status{margin:10px 0;color:#666}
-  .results{margin-top:18px}
-  table{width:100%;border-collapse:collapse}
-  th,td{padding:10px;border:1px solid #e6e6e6;text-align:left;font-size:14px}
-  th{background:#fafafa}
-  .no-results{padding:16px;background:#fff5f5;border-left:4px solid #f44336;color:#8b0000}
-  .row-card{padding:12px;background:#f8fbff;border-left:4px solid #e0f0ff;margin-bottom:10px}
-  .small{font-size:13px;color:#666}
-  @media (max-width:520px){.container{margin:20px;padding:12px}}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dhuruvan Logistics - Tracking</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:#f3f3f3;margin:0;padding:40px}
+    .container{max-width:700px;margin:40px auto;background:white;padding:22px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.08)}
+    h1{margin:0 0 14px;font-size:24px}
+    input[type=text]{width:100%;padding:14px;font-size:16px;border:1px solid #ccc;border-radius:2px;box-sizing:border-box}
+    button{width:100%;padding:14px;margin-top:12px;background:#0b75d1;color:white;border:none;border-radius:4px;font-size:16px;cursor:pointer}
+    .result{margin-top:18px;padding:12px;border-radius:6px;background:#eef6ff;border-left:6px solid #0b75d1}
+    .notfound{background:#fff0f0;border-left:6px solid #d9534f}
+    pre{white-space:pre-wrap;font-size:13px;overflow:auto}
+    .small{font-size:13px;color:#666}
+  </style>
 </head>
 <body>
   <div class="container">
-    <h1>Dhuruvan Logistics — Tracking</h1>
+    <h1>Dhuruvan Logistics – Tracking</h1>
 
-    <div class="input-row">
-      <input id="lrInput" placeholder="Enter LR Number (Example: DL-45)" aria-label="LR number" />
-    </div>
+    <input id="lrInput" type="text" placeholder="Enter LR Number (Example: DL-45)" />
+    <button id="trackBtn">Track Shipment</button>
 
-    <button id="searchBtn">Track Shipment</button>
-
-    <div id="status" class="status">Loading data …</div>
-
-    <div id="results" class="results" aria-live="polite"></div>
+    <div id="out" class="result small" style="display:none"></div>
+    <div id="debug" style="display:none"></div>
   </div>
 
 <script>
 /*
-  Replace the CSV URL below with the published CSV URL you gave:
-  (the one you pasted earlier)
+  Edit the CSV_URL below with the published CSV link you created:
+  Example (from your screenshots):
+  https://docs.google.com/spreadsheets/d/e/2PACX-1vQl-.../pub?gid=1342163903&single=true&output=csv
 */
-const csvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQl-WKitKRYjuLYadf5r56o01A_wYmfasu8gYfMSV9zjRnDPLXO5em9DCDrSfMrItNQ7uFDUUMgcX4q/pub?gid=1342163903&single=true&output=csv";
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQl-WKitKRYjuLYadf5r56o01A_wYmfasu8gYfMSV9zjRnDPLXO5em9DCDrSfMrItNQ7uFDUUMgcX4q/pub?gid=1342163903&single=true&output=csv';
 
-const statusEl = document.getElementById('status');
-const resultsEl = document.getElementById('results');
-const btn = document.getElementById('searchBtn');
+const outEl = document.getElementById('out');
+const debugEl = document.getElementById('debug');
 const input = document.getElementById('lrInput');
+const btn = document.getElementById('trackBtn');
 
-let DATA = []; // array of objects (rows)
-let HEADERS = [];
+btn.addEventListener('click', searchAndShow);
+input.addEventListener('keydown', e => { if (e.key === 'Enter') searchAndShow(); });
 
-/* Robust (enough) CSV parser handling quoted values and commas */
+async function searchAndShow(){
+  const queryRaw = input.value || '';
+  const query = normalizeLR(queryRaw);
+  outEl.style.display = 'none';
+  outEl.className = 'result small';
+
+  if (!query) {
+    showMessage('Please type an LR number (e.g. DL-45).', true);
+    return;
+  }
+
+  showMessage('Searching...', false);
+  try {
+    console.log('CSV DEBUG: fetching CSV from', CSV_URL);
+    const csvText = await fetchCsv(CSV_URL);
+    console.log('CSV DEBUG: first 200 chars:', csvText.slice(0,200));
+    const table = parseCSV(csvText);
+    console.log('CSV DEBUG: headers:', table.headers);
+    debugEl.style.display = 'block';
+    debugEl.textContent = 'CSV DEBUG: rows=' + table.rows.length;
+
+    // find which column(s) to search
+    const candidates = [];
+    const h = table.headers.map(h => h.toLowerCase());
+    if (h.includes('lr normalized')) candidates.push(h.indexOf('lr normalized'));
+    if (h.includes('lr_normalized')) candidates.push(h.indexOf('lr_normalized'));
+    if (h.includes('lr number')) candidates.push(h.indexOf('lr number'));
+    if (h.includes('lr_number')) candidates.push(h.indexOf('lr_number'));
+    // fallback: search all columns
+    if (candidates.length === 0) {
+      for (let i=0;i<h.length;i++) candidates.push(i);
+    }
+
+    // Search rows
+    let found = null;
+    for (const r of table.rows) {
+      for (const colIndex of candidates) {
+        const cell = (r[colIndex] || '').toString();
+        const normCell = normalizeLR(cell);
+        if (!normCell) continue;
+        if (normCell === query) { found = r; break; }
+        // also allow partial match (if query is just numeric)
+        if (/^\d+$/.test(query) && normCell.endsWith(query)) { found = r; break; }
+      }
+      if (found) break;
+    }
+
+    if (found) {
+      // build readable result
+      const outHtml = buildResultHtml(table.headers, found);
+      showMessage(outHtml, false);
+      console.log('CSV DEBUG: match found ->', found);
+    } else {
+      showMessage('No matching LR found. (Tried normalized + LR Number columns.)', true);
+      console.log('CSV DEBUG: no match. query=', query);
+    }
+
+  } catch (err) {
+    console.error('CSV ERROR', err);
+    showMessage('Error loading data: ' + err.message, true);
+  }
+}
+
+function showMessage(msg, isError){
+  outEl.style.display = 'block';
+  outEl.className = isError ? 'result notfound small' : 'result small';
+  // if html-like string passed, set innerHTML, otherwise text
+  if (/<[a-z][\s\S]*>/i.test(msg)) outEl.innerHTML = msg;
+  else outEl.textContent = msg;
+}
+
+// normalize LR: trim, uppercase, remove spaces, remove common prefixes like 'DL-','DL '
+function normalizeLR(s){
+  if (!s) return '';
+  s = String(s).trim().toUpperCase();
+  s = s.replace(/\s+/g,'');
+  s = s.replace(/^DL-?/, '');   // remove starting DL or DL-
+  s = s.replace(/^LR-?/, '');
+  s = s.replace(/^0+/, '');     // optional: remove leading zeros
+  return s;
+}
+
+async function fetchCsv(url){
+  const resp = await fetch(url, {cache: "no-store"});
+  if (!resp.ok) throw new Error('Fetch failed: ' + resp.status + ' ' + resp.statusText);
+  return await resp.text();
+}
+
+// Simple CSV parser that returns headers[] and rows[] (array of arrays)
 function parseCSV(text){
+  // handle CRLF and LF
   const rows = [];
   let cur = '';
   let row = [];
   let inQuotes = false;
-  for (let i = 0; i < text.length; i++){
+
+  for (let i = 0; i < text.length; i++) {
     const ch = text[i];
-    if (ch === '"'){
-      // handle double quotes inside quoted field
-      if (inQuotes && i+1 < text.length && text[i+1] === '"'){
-        cur += '"'; i++; // skip escaped quote
+    const nxt = text[i+1];
+
+    if (ch === '"' ) {
+      if (inQuotes && nxt === '"') {
+        cur += '"'; // escaped quote
+        i++; // skip second quote
       } else {
         inQuotes = !inQuotes;
       }
-    } else if (ch === ',' && !inQuotes){
+      continue;
+    }
+    if (!inQuotes && (ch === ',')) {
       row.push(cur);
       cur = '';
-    } else if ((ch === '\n' || ch === '\r') && !inQuotes){
-      if (cur !== '' || row.length > 0) {
-        row.push(cur);
-        rows.push(row);
-        row = [];
-        cur = '';
-      }
-      // skip CRLF second char
-      if (ch === '\r' && text[i+1] === '\n') i++;
-    } else {
-      cur += ch;
+      continue;
     }
+    if (!inQuotes && (ch === '\n' || ch === '\r')) {
+      // handle \r\n
+      if (ch === '\r' && nxt === '\n') { i++; }
+      row.push(cur);
+      rows.push(row);
+      row = [];
+      cur = '';
+      continue;
+    }
+    cur += ch;
   }
-  // last cell
+  // leftover
   if (cur !== '' || row.length > 0) {
     row.push(cur);
     rows.push(row);
   }
-  return rows;
+
+  // remove completely empty trailing rows
+  while (rows.length && rows[rows.length-1].every(c => c === '')) rows.pop();
+
+  const headers = rows.length ? rows[0].map(h => (h||'').trim()) : [];
+  const dataRows = rows.slice(1).map(r => r.map(c => c === undefined ? '' : c.trim()));
+  return { headers, rows: dataRows };
 }
 
-/* Normalizer for LR numbers:
-   - convert to uppercase
-   - remove spaces and extra punctuation except dash
-   - keep alphanumerics and dash
-*/
-function normalizeLR(s){
-  if (!s && s !== 0) return '';
-  return String(s).toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9\-]/g,'');
-}
-
-/* fetch CSV and parse into DATA */
-async function loadData(){
-  try{
-    statusEl.textContent = 'Fetching latest shipments...';
-    const res = await fetch(csvUrl);
-    if (!res.ok) throw new Error('Failed to fetch CSV: ' + res.status);
-    const text = await res.text();
-    const rows = parseCSV(text);
-    if (!rows || rows.length === 0) throw new Error('CSV appears empty');
-
-    HEADERS = rows[0].map(h => (h || '').trim());
-    DATA = [];
-    for (let r = 1; r < rows.length; r++){
-      const row = rows[r];
-      // build object map using headers
-      const obj = {};
-      for (let c = 0; c < HEADERS.length; c++){
-        obj[HEADERS[c] || ('col'+c)] = (row[c] || '').trim();
-      }
-      // add normalized LR fields for quick matching
-      obj.__LR_normalized = normalizeLR(obj['LR Number'] || obj['LR_Number'] || obj['LRNumber'] || obj['LR Normalized'] || obj['LR_Normalized'] || obj['LRNormalized'] || obj['LR'] || obj['lr'] || '');
-      DATA.push(obj);
-    }
-
-    statusEl.textContent = Loaded ${DATA.length} rows. Enter LR and click Track Shipment.;
-  }catch(err){
-    console.error(err);
-    statusEl.textContent = 'Error loading data — see console.';
-    resultsEl.innerHTML = '<div class="no-results">Could not load the spreadsheet. Make sure the sheet is published to the web as CSV and the link is correct.</div>';
+function buildResultHtml(headers, row){
+  let html = '<strong>Shipment details:</strong><br><table>';
+  for (let i=0;i<headers.length;i++){
+    const head = headers[i] || ('col'+i);
+    const val = row[i] || '';
+    html += <div><strong>${escapeHtml(head)}:</strong> ${escapeHtml(val)}</div>;
   }
+  html += '</table>';
+  return html;
 }
 
-/* Render search results */
-function renderResults(matches){
-  resultsEl.innerHTML = '';
-  if (!matches || matches.length === 0){
-    resultsEl.innerHTML = '<div class="no-results">No matching shipment found.</div>';
-    return;
-  }
-
-  // If few matches, show card view. If many, show table.
-  if (matches.length <= 6){
-    matches.forEach(row => {
-      const card = document.createElement('div');
-      card.className = 'row-card';
-      const parts = [];
-      // show key fields (choose common ones)
-      const headerOrder = ['LR Number','LR Normalized','Consignor Name','Consignee Name','Pickup Location','Destination','Status','Timestamp','Contact','Remark'];
-      headerOrder.forEach(k => {
-        // fallback to any header if not exact name
-        const keys = Object.keys(row).filter(h => h.toLowerCase().replace(/\s+/g,'').includes(k.toLowerCase().replace(/\s+/g,'')));
-        if (keys.length) {
-          const val = row[keys[0]];
-          if (val) parts.push(<div><strong>${keys[0]}:</strong> ${escapeHtml(val)}</div>);
-        }
-      });
-      // also show other fields if present
-      const otherKeys = Object.keys(row).filter(k => !k.startsWith('__') && !headerOrder.some(h=>k.toLowerCase().includes(h.toLowerCase().replace(/\s+/g,''))));
-      if (otherKeys.length){
-        parts.push('<div class="small">Other:</div>');
-        otherKeys.forEach(k => {
-          if (row[k]) parts.push(<div class="small">${escapeHtml(k)}: ${escapeHtml(row[k])}</div>);
-        });
-      }
-      card.innerHTML = parts.join('');
-      resultsEl.appendChild(card);
-    });
-  } else {
-    // table
-    const table = document.createElement('table');
-    const thead = document.createElement('thead');
-    const trh = document.createElement('tr');
-    // show first few columns as headers
-    const displayHeaders = Object.keys(matches[0]).filter(h=>!h.startsWith('__')).slice(0,8);
-    displayHeaders.forEach(h => {
-      const th = document.createElement('th');
-      th.textContent = h;
-      trh.appendChild(th);
-    });
-    thead.appendChild(trh);
-    table.appendChild(thead);
-    const tbody = document.createElement('tbody');
-    matches.forEach(r=>{
-      const tr = document.createElement('tr');
-      displayHeaders.forEach(h=>{
-        const td = document.createElement('td');
-        td.textContent = r[h] || '';
-        tr.appendChild(td);
-      });
-      tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    resultsEl.appendChild(table);
-  }
-}
-
-/* simple HTML escaping */
 function escapeHtml(s){
-  return String(s).replace(/[&<>"']/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]); });
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-
-/* search handler */
-function doSearch(){
-  const q = normalizeLR(input.value || '');
-  if (!q){
-    resultsEl.innerHTML = '<div class="no-results">Please enter an LR number.</div>';
-    return;
-  }
-  statusEl.textContent = 'Searching…';
-  // match if normalized field equals, or LR Number contains q
-  const matches = DATA.filter(r => {
-    if (!r) return false;
-    if ((r.__LR_normalized || '') === q) return true;
-    // try raw LR Number columns
-    for (const k of Object.keys(r)){
-      if (k.toLowerCase().includes('lr') || k.toLowerCase().includes('lrnumber')){
-        if (normalizeLR(r[k]).includes(q)) return true;
-      }
-    }
-    // as fallback search any cell text
-    for (const k of Object.keys(r)){
-      if ((r[k] || '').toString().toUpperCase().replace(/\s+/g,'').indexOf(q) !== -1) return true;
-    }
-    return false;
-  });
-
-  renderResults(matches);
-  statusEl.textContent = Found ${matches.length} match(es).;
-}
-
-/* init */
-btn.addEventListener('click', doSearch);
-input.addEventListener('keydown', function(e){ if (e.key === 'Enter') doSearch(); });
-
-loadData();
 </script>
 </body>
 </html>

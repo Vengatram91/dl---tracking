@@ -18,26 +18,26 @@
             max-width: 700px;
             margin: 40px auto;
             background: white;
-            padding: 22px;
-            border-radius: 12px;
-            box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
         }
 
         input[type="text"] {
             width: 100%;
             padding: 14px;
-            font-size: 18px;
-            border: 1px solid #ccc;
+            font-size: 16px;
             border-radius: 6px;
+            border: 1px solid #ccc;
+            margin-bottom: 15px;
         }
 
         button {
             width: 100%;
             padding: 14px;
-            margin-top: 12px;
-            font-size: 18px;
             background: #007bff;
             color: white;
+            font-size: 16px;
             border: none;
             border-radius: 6px;
             cursor: pointer;
@@ -48,100 +48,90 @@
         }
 
         .result {
-            margin-top: 22px;
-            padding: 14px;
-            background: #eef6ff;
-            border-left: 6px solid #3399ff;
+            margin-top: 20px;
+            padding: 15px;
             text-align: left;
+            border-left: 4px solid green;
+            background: #e8ffe6;
         }
 
         .error {
             margin-top: 20px;
-            padding: 12px;
-            background: #ffe5e5;
-            border-left: 6px solid #ff3333;
-            font-size: 17px;
+            padding: 15px;
+            text-align: left;
+            border-left: 4px solid red;
+            background: #ffe6e6;
         }
     </style>
-</head>
 
+</head>
 <body>
+
     <div class="container">
         <h1>Dhuruvan Logistics – Tracking</h1>
 
-        <input id="input" type="text" placeholder="Enter LR Number (Example: DL-45)">
+        <input id="lrInput" type="text" placeholder="Enter LR Number (Example: DL-45)" />
+
         <button onclick="trackShipment()">Track Shipment</button>
 
         <div id="result"></div>
     </div>
 
-    <!-- ================= SCRIPT STARTS HERE ================= -->
     <script>
-        // Your published CSV sheet link
-        const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQl-WKitKRYjuLYadf5r56o01A_wYmfasu8gYfMSV9zjRnDPLXO5em9DCDrSfMrItNQ7uFDUUMgcX4q/pub?gid=1342163903&single=true&output=csv";
 
-        // Convert CSV text to JSON array
-        function csvToJSON(csv) {
-            const lines = csv.split("\n");
-            const headers = lines[0].split(",");
-
-            const result = [];
-            for (let i = 1; i < lines.length; i++) {
-                const obj = {};
-                const row = lines[i].split(",");
-
-                headers.forEach((h, index) => {
-                    obj[h.trim()] = row[index] ? row[index].trim() : "";
-                });
-
-                result.push(obj);
-            }
-            return result;
-        }
+        // CSV link
+        const CSV_URL =
+"https://docs.google.com/spreadsheets/d/e/2PACX-1vQl-WKitKRYjuLYadf5r56o01A_wYmfasu8gYfMSV9zjRnDPLXO5em9DCD rSfMrItNQ7uFDUUMgcX4q/pub?gid=1342163903&single=true&output=csv"
+            .replace(/\s/g, "");
 
         async function trackShipment() {
-            const lrInput = document.getElementById("input").value.trim().toUpperCase();
+            const lr = document.getElementById("lrInput").value.trim().toUpperCase();
             const output = document.getElementById("result");
-            output.innerHTML = "";
 
-            if (!lrInput) {
-                output.innerHTML = <div class='error'>Please enter LR Number.</div>;
+            if (!lr) {
+                output.innerHTML = <div class="error">Please enter LR Number</div>;
                 return;
             }
 
+            output.innerHTML = <div>Searching...</div>;
+
             try {
                 const response = await fetch(CSV_URL);
-                const csvText = await response.text();
+                const data = await response.text();
 
-                const data = csvToJSON(csvText);
+                const rows = data.split("\n").map(r => r.split(","));
 
-                // Try to find LR Number
-                const match = data.find(row =>
-                    row["LR Normalized"]?.toUpperCase() === lrInput
-                );
+                const headers = rows[0];
+                const entries = rows.slice(1).map(row => {
+                    let obj = {};
+                    headers.forEach((h, i) => obj[h.trim()] = row[i] ? row[i].trim() : "");
+                    return obj;
+                });
+
+                const match = entries.find(x => x["LR Normalized"] === lr);
 
                 if (match) {
                     output.innerHTML = `
-                        <div class='result'>
+                        <div class="result">
                             <b>LR Number:</b> ${match["LR Normalized"]}<br>
                             <b>Consignor:</b> ${match["Consignor Name"]}<br>
                             <b>Consignee:</b> ${match["Consignee Name"]}<br>
                             <b>Pickup:</b> ${match["Pickup Location"]}<br>
                             <b>Delivery:</b> ${match["Delivery Location"]}<br>
-                            <b>Status:</b> ${match["Shipment Status"] || "Not Updated"}
+                            <b>Status:</b> ${match["Shipment Status"] || "Not Updated"}<br>
                         </div>
                     `;
                 } else {
-                    output.innerHTML = <div class='error'>No shipment found for LR: ${lrInput}</div>;
+                    output.innerHTML = <div class="error">No shipment found for LR: ${lr}</div>;
                 }
 
             } catch (err) {
                 console.error(err);
-                output.innerHTML = <div class='error'>Error loading data. Try again.</div>;
+                output.innerHTML = <div class="error">Error loading data. Try again.</div>;
             }
         }
+
     </script>
-    <!-- ================= SCRIPT ENDS HERE ================= -->
+
 </body>
 </html>
-

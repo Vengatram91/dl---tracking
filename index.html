@@ -1,137 +1,201 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Dhuruvan Logistics – Tracking</title>
-
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #f3f3f3;
-            margin: 0;
-            padding: 20px;
-            text-align: center;
-        }
-
-        .container {
-            max-width: 700px;
-            margin: 40px auto;
-            background: white;
-            padding: 25px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-
-        input[type="text"] {
-            width: 100%;
-            padding: 14px;
-            font-size: 16px;
-            border-radius: 6px;
-            border: 1px solid #ccc;
-            margin-bottom: 15px;
-        }
-
-        button {
-            width: 100%;
-            padding: 14px;
-            background: #007bff;
-            color: white;
-            font-size: 16px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-        }
-
-        button:hover {
-            background: #0056b3;
-        }
-
-        .result {
-            margin-top: 20px;
-            padding: 15px;
-            text-align: left;
-            border-left: 4px solid green;
-            background: #e8ffe6;
-        }
-
-        .error {
-            margin-top: 20px;
-            padding: 15px;
-            text-align: left;
-            border-left: 4px solid red;
-            background: #ffe6e6;
-        }
-    </style>
-
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dhuruvan Logistics - Tracking</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:#f3f3f3;margin:0;padding:40px}
+    .container{max-width:700px;margin:40px auto;background:white;padding:22px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.08)}
+    h1{margin:0 0 14px;font-size:24px}
+    input[type=text]{width:100%;padding:14px;font-size:16px;border:1px solid #ccc;border-radius:2px;box-sizing:border-box}
+    button{width:100%;padding:14px;margin-top:12px;background:#0b75d1;color:white;border:none;border-radius:4px;font-size:16px;cursor:pointer}
+    .result{margin-top:18px;padding:12px;border-radius:6px;background:#eef6ff;border-left:6px solid #0b75d1}
+    .notfound{background:#fff0f0;border-left:6px solid #d9534f}
+    pre{white-space:pre-wrap;font-size:13px;overflow:auto}
+    .small{font-size:13px;color:#666}
+  </style>
 </head>
 <body>
+  <div class="container">
+    <h1>Dhuruvan Logistics – Tracking</h1>
 
-    <div class="container">
-        <h1>Dhuruvan Logistics – Tracking</h1>
+    <input id="lrInput" type="text" placeholder="Enter LR Number (Example: DL-45)" />
+    <button id="trackBtn">Track Shipment</button>
 
-        <input id="lrInput" type="text" placeholder="Enter LR Number (Example: DL-45)" />
+    <div id="out" class="result small" style="display:none"></div>
+    <div id="debug" style="display:none"></div>
+  </div>
 
-        <button onclick="trackShipment()">Track Shipment</button>
+<script>
+/*
+  Edit the CSV_URL below with the published CSV link you created:
+  Example (from your screenshots):
+  https://docs.google.com/spreadsheets/d/e/2PACX-1vQl-.../pub?gid=1342163903&single=true&output=csv
+*/
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQl-WKitKRYjuLYadf5r56o01A_wYmfasu8gYfMSV9zjRnDPLXO5em9DCDrSfMrItNQ7uFDUUMgcX4q/pub?gid=1342163903&single=true&output=csv';
 
-        <div id="result"></div>
-    </div>
+const outEl = document.getElementById('out');
+const debugEl = document.getElementById('debug');
+const input = document.getElementById('lrInput');
+const btn = document.getElementById('trackBtn');
 
-    <script>
+btn.addEventListener('click', searchAndShow);
+input.addEventListener('keydown', e => { if (e.key === 'Enter') searchAndShow(); });
 
-        // CSV link
-        const CSV_URL =
-"https://docs.google.com/spreadsheets/d/e/2PACX-1vQl-WKitKRYjuLYadf5r56o01A_wYmfasu8gYfMSV9zjRnDPLXO5em9DCD rSfMrItNQ7uFDUUMgcX4q/pub?gid=1342163903&single=true&output=csv"
-            .replace(/\s/g, "");
+async function searchAndShow(){
+  const queryRaw = input.value || '';
+  const query = normalizeLR(queryRaw);
+  outEl.style.display = 'none';
+  outEl.className = 'result small';
 
-        async function trackShipment() {
-            const lr = document.getElementById("lrInput").value.trim().toUpperCase();
-            const output = document.getElementById("result");
+  if (!query) {
+    showMessage('Please type an LR number (e.g. DL-45).', true);
+    return;
+  }
 
-            if (!lr) {
-                output.innerHTML = <div class="error">Please enter LR Number</div>;
-                return;
-            }
+  showMessage('Searching...', false);
+  try {
+    console.log('CSV DEBUG: fetching CSV from', CSV_URL);
+    const csvText = await fetchCsv(CSV_URL);
+    console.log('CSV DEBUG: first 200 chars:', csvText.slice(0,200));
+    const table = parseCSV(csvText);
+    console.log('CSV DEBUG: headers:', table.headers);
+    debugEl.style.display = 'block';
+    debugEl.textContent = 'CSV DEBUG: rows=' + table.rows.length;
 
-            output.innerHTML = <div>Searching...</div>;
+    // find which column(s) to search
+    const candidates = [];
+    const h = table.headers.map(h => h.toLowerCase());
+    if (h.includes('lr normalized')) candidates.push(h.indexOf('lr normalized'));
+    if (h.includes('lr_normalized')) candidates.push(h.indexOf('lr_normalized'));
+    if (h.includes('lr number')) candidates.push(h.indexOf('lr number'));
+    if (h.includes('lr_number')) candidates.push(h.indexOf('lr_number'));
+    // fallback: search all columns
+    if (candidates.length === 0) {
+      for (let i=0;i<h.length;i++) candidates.push(i);
+    }
 
-            try {
-                const response = await fetch(CSV_URL);
-                const data = await response.text();
+    // Search rows
+    let found = null;
+    for (const r of table.rows) {
+      for (const colIndex of candidates) {
+        const cell = (r[colIndex] || '').toString();
+        const normCell = normalizeLR(cell);
+        if (!normCell) continue;
+        if (normCell === query) { found = r; break; }
+        // also allow partial match (if query is just numeric)
+        if (/^\d+$/.test(query) && normCell.endsWith(query)) { found = r; break; }
+      }
+      if (found) break;
+    }
 
-                const rows = data.split("\n").map(r => r.split(","));
+    if (found) {
+      // build readable result
+      const outHtml = buildResultHtml(table.headers, found);
+      showMessage(outHtml, false);
+      console.log('CSV DEBUG: match found ->', found);
+    } else {
+      showMessage('No matching LR found. (Tried normalized + LR Number columns.)', true);
+      console.log('CSV DEBUG: no match. query=', query);
+    }
 
-                const headers = rows[0];
-                const entries = rows.slice(1).map(row => {
-                    let obj = {};
-                    headers.forEach((h, i) => obj[h.trim()] = row[i] ? row[i].trim() : "");
-                    return obj;
-                });
+  } catch (err) {
+    console.error('CSV ERROR', err);
+    showMessage('Error loading data: ' + err.message, true);
+  }
+}
 
-                const match = entries.find(x => x["LR Normalized"] === lr);
+function showMessage(msg, isError){
+  outEl.style.display = 'block';
+  outEl.className = isError ? 'result notfound small' : 'result small';
+  // if html-like string passed, set innerHTML, otherwise text
+  if (/<[a-z][\s\S]*>/i.test(msg)) outEl.innerHTML = msg;
+  else outEl.textContent = msg;
+}
 
-                if (match) {
-                    output.innerHTML = `
-                        <div class="result">
-                            <b>LR Number:</b> ${match["LR Normalized"]}<br>
-                            <b>Consignor:</b> ${match["Consignor Name"]}<br>
-                            <b>Consignee:</b> ${match["Consignee Name"]}<br>
-                            <b>Pickup:</b> ${match["Pickup Location"]}<br>
-                            <b>Delivery:</b> ${match["Delivery Location"]}<br>
-                            <b>Status:</b> ${match["Shipment Status"] || "Not Updated"}<br>
-                        </div>
-                    `;
-                } else {
-                    output.innerHTML = <div class="error">No shipment found for LR: ${lr}</div>;
-                }
+// normalize LR: trim, uppercase, remove spaces, remove common prefixes like 'DL-','DL '
+function normalizeLR(s){
+  if (!s) return '';
+  s = String(s).trim().toUpperCase();
+  s = s.replace(/\s+/g,'');
+  s = s.replace(/^DL-?/, '');   // remove starting DL or DL-
+  s = s.replace(/^LR-?/, '');
+  s = s.replace(/^0+/, '');     // optional: remove leading zeros
+  return s;
+}
 
-            } catch (err) {
-                console.error(err);
-                output.innerHTML = <div class="error">Error loading data. Try again.</div>;
-            }
-        }
+async function fetchCsv(url){
+  const resp = await fetch(url, {cache: "no-store"});
+  if (!resp.ok) throw new Error('Fetch failed: ' + resp.status + ' ' + resp.statusText);
+  return await resp.text();
+}
 
-    </script>
+// Simple CSV parser that returns headers[] and rows[] (array of arrays)
+function parseCSV(text){
+  // handle CRLF and LF
+  const rows = [];
+  let cur = '';
+  let row = [];
+  let inQuotes = false;
 
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const nxt = text[i+1];
+
+    if (ch === '"' ) {
+      if (inQuotes && nxt === '"') {
+        cur += '"'; // escaped quote
+        i++; // skip second quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (!inQuotes && (ch === ',')) {
+      row.push(cur);
+      cur = '';
+      continue;
+    }
+    if (!inQuotes && (ch === '\n' || ch === '\r')) {
+      // handle \r\n
+      if (ch === '\r' && nxt === '\n') { i++; }
+      row.push(cur);
+      rows.push(row);
+      row = [];
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  // leftover
+  if (cur !== '' || row.length > 0) {
+    row.push(cur);
+    rows.push(row);
+  }
+
+  // remove completely empty trailing rows
+  while (rows.length && rows[rows.length-1].every(c => c === '')) rows.pop();
+
+  const headers = rows.length ? rows[0].map(h => (h||'').trim()) : [];
+  const dataRows = rows.slice(1).map(r => r.map(c => c === undefined ? '' : c.trim()));
+  return { headers, rows: dataRows };
+}
+
+function buildResultHtml(headers, row){
+  let html = '<strong>Shipment details:</strong><br><table>';
+  for (let i=0;i<headers.length;i++){
+    const head = headers[i] || ('col'+i);
+    const val = row[i] || '';
+    html += <div><strong>${escapeHtml(head)}:</strong> ${escapeHtml(val)}</div>;
+  }
+  html += '</table>';
+  return html;
+}
+
+function escapeHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
 </body>
 </html>
